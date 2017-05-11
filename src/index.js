@@ -65,5 +65,5 @@ const cssString = swatchy({
 if( cli.output ) {
 	fs.writeFileSync(cli.output, cssString, 'utf-8');
 } else {
-	console.log(cssString);
+	log(cssString);
 }
