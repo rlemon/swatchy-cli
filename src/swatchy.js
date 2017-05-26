@@ -40,32 +40,70 @@ export default function Swatchy(options) {
 	*/
 	const properties = options.properties || defaultProperties;
 	const parsedCss = css.parse(options.input);
-	for( const rule of parsedCss.stylesheet.rules ) {
-		if( !rule.declarations ) continue;
-		for( const declaration of rule.declarations ) {
-			if( properties.includes(declaration.property) ) {
-				declaration.value = declaration.value.replace(reColor, match => {
-					let rgb;
-					if( /#/g.test(match) ) {
-						rgb = hexToRgbA(match);
-					} else {
-						const parts = match.match(reDigit);
-						rgb = {
-							r: parts[0],
-							g: parts[1],
-							b: parts[2],
-							a: typeof parts[3] === 'undefined' ? 1 : parts[3]
-						};
-					}
-					if( options.invert ) {
-						rgb = invertRgb(rgb);
-					}
-					const newColor = getClosestColor(rgb, options.swatch);
-					return `rgba(${newColor.r},${newColor.g},${newColor.b},${newColor.a})`;
-				});
-			}
+	const ast = {
+		type: 'stylesheet',
+		stylesheet: {
+			rules: reduceRules(parsedCss.stylesheet.rules, options)
 		}
 	}
-	const cssString = css.stringify(parsedCss, { compress: options.compress });
-	return cssString;
+	const cssString = css.stringify(ast, { compress: options.compress });
+	return cssString.replace(/^\s*[\r\n]/gm, ''); // uncompressed leaves blank lines for some stupid reason.
+}
+
+function reduceRules(rules, options) {
+	return rules.reduce( ( arr, rule ) => {
+		if( rule.type === 'media' ) {
+			rule.rules = reduceRules(rule.rules, options);
+			const shouldUpdate = rule.rules.every(rule => rule.declarations.length );
+			if( !shouldUpdate ) {
+				rule = null;
+			}
+		} else if ( rule.type === 'rule' ) {
+			rule.declarations = parseDeclarations(rule.declarations, options);
+		} else if ( rule.type === 'keyframes' ) {  // I'm not happy about any of this.
+			let shouldUpdate = false;
+			rule.keyframes = rule.keyframes.map(keyframe => {
+				const td = parseDeclarations(keyframe.declarations, options);
+				if( td.length ) {
+					shouldUpdate = true;
+					keyframe.declarations = parseDeclarations(keyframe.declarations, options, true);
+				}
+				return keyframe;
+			});
+			if( !shouldUpdate ) {
+				rule = null;
+			}
+		}
+		if( rule ) arr.push(rule);
+		return arr;
+	}, []);
+}
+
+function parseDeclarations(declarations, options, matchAll = false) {
+	const tmp = [];
+	for( const declaration of declarations ) {
+		if( declaration.value.match(reColor) || matchAll ) {
+			tmp.push(declaration);
+			declaration.value = declaration.value.replace(reColor, match => {
+				let rgb;
+				if( /#/g.test(match) ) {
+					rgb = hexToRgbA(match);
+				} else {
+					const parts = match.match(reDigit);
+					rgb = {
+						r: parts[0],
+						g: parts[1],
+						b: parts[2],
+						a: typeof parts[3] === 'undefined' ? 1 : parts[3]
+					};
+				}
+				if( options.invert ) {
+					rgb = invertRgb(rgb);
+				}
+				const newColor = getClosestColor(rgb, options.swatch);
+				return `rgba(${newColor.r},${newColor.g},${newColor.b},${newColor.a})`;
+			});
+		}
+	}
+	return tmp;
 }
